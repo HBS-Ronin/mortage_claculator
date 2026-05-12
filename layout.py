@@ -50,7 +50,15 @@ def get_layout():
                     ], className="mb-3"),
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Annual Salary (£)", className="fw-bold"),
+                            html.Label("Annual Salary — Person 1 (£)", className="fw-bold"),
+                            dbc.Checklist(
+                                id="partner-income-toggle",
+                                options=[{"label": "Add Partner Income", "value": "active"}],
+                                value=[],
+                                switch=True,
+                                inline=True,
+                                className="mb-1",
+                            ),
                             dcc.Slider(
                                 id="salary-slider", min=20000, max=150000, step=100, value=50000,
                                 marks={i: f"£{i // 1000}k" for i in range(20000, 151000, 20000)},
@@ -66,6 +74,24 @@ def get_layout():
                             ),
                         ], md=6),
                     ]),
+                    # Partner income section — always in DOM, hidden until toggle on
+                    html.Div(
+                        id="partner-income-section",
+                        style={"display": "none"},
+                        children=[
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Label("Annual Salary — Partner (£)", className="fw-bold"),
+                                    dcc.Slider(
+                                        id="salary-2-slider",
+                                        min=0, max=150_000, step=1_000, value=0,
+                                        marks={i: f"£{i // 1000}k" for i in range(0, 151_000, 30_000)},
+                                        tooltip={"placement": "bottom", "always_visible": True},
+                                    ),
+                                ], md=6),
+                            ], className="mt-3"),
+                        ],
+                    ),
                 ]),
                 className="mb-4",
             ),
