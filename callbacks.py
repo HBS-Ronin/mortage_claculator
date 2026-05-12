@@ -99,7 +99,7 @@ def register_callbacks(app):
                         + calculate_take_home_pay(effective_salary_2))
         return _build_breakdown_cards(rate, term, monthly_payment,
                                       down_payment_pct, combined_gross, combined_net,
-                                      target_multiplier)
+                                      target_multiplier, partner_active=bool(partner_toggle))
 
     # ── Repayment Map tab ─────────────────────────────────────────────────────
 
@@ -221,7 +221,7 @@ def _render_affordability_tab(monthly_payment, down_payment_pct, rate_range, ter
 
 def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range,
                         combined_gross, combined_net, multiplier_range,
-                        salary_1, salary_2, partner_active):
+                        salary_1, effective_salary_2, partner_active):
     mid_rate = (rate_range[0] + rate_range[1]) / 2 / 100
     mid_term = (term_range[0] + term_range[1]) // 2
 
@@ -287,7 +287,7 @@ def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range
     if partner_active:
         salary_display = (
             f"£{combined_gross:,} gross "
-            f"(Person 1: £{salary_1:,} + Partner: £{salary_2:,})"
+            f"(Person 1: £{salary_1:,} + Partner: £{effective_salary_2:,})"
         )
     else:
         salary_display = f"£{combined_gross:,}"
@@ -438,7 +438,8 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
 
 
 def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct,
-                            combined_gross, combined_net, target_multiplier):
+                            combined_gross, combined_net, target_multiplier,
+                            partner_active=False):
     """Shared helper used by update_breakdown_results."""
     rate_decimal = rate / 100
     house_value = float(calculate_principal(monthly_payment, rate_decimal, term, down_payment_pct))
@@ -459,7 +460,9 @@ def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct,
                     html.P([html.Strong("Loan Term: "), f"{term} years"]),
                     html.P([html.Strong("Monthly Payment: "), f"£{monthly_payment:,.2f}"]),
                     html.P([html.Strong("Down Payment: "), f"{down_payment_pct}%"]),
-                    html.P([html.Strong("Annual Salary: "), f"£{combined_gross:,}"]),
+                    html.P([html.Strong(
+                        "Combined Salary: " if partner_active else "Annual Salary: "
+                    ), f"£{combined_gross:,}"]),
                     html.P([html.Strong("Annual Take-Home: "), f"£{combined_net:,.0f}"]),
                     html.P([
                         html.Strong("Payment to Take-Home: "),
