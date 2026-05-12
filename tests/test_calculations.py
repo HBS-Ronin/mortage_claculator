@@ -67,3 +67,41 @@ def test_generate_amortization_schedule_balance_reaches_zero():
     schedule, _ = generate_amortization_schedule(200_000, 10, 0.04, 20)
     final_balance = float(schedule[-1]["Balance"].replace("£", "").replace(",", ""))
     assert final_balance == pytest.approx(0.0, abs=1.0)
+
+
+def test_take_home_zero():
+    from calculations import calculate_take_home_pay
+    assert calculate_take_home_pay(0) == pytest.approx(0)
+
+
+def test_take_home_below_personal_allowance():
+    from calculations import calculate_take_home_pay
+    # £10,000 — below personal allowance and NI threshold, no deductions
+    assert calculate_take_home_pay(10_000) == pytest.approx(10_000)
+
+
+def test_take_home_basic_rate_only():
+    from calculations import calculate_take_home_pay
+    # £30,000 gross
+    # IT:  (30000 - 12570) * 0.20 = 17430 * 0.20 = 3486.00
+    # NI:  (30000 - 12570) * 0.08 = 17430 * 0.08 = 1394.40
+    # Net: 30000 - 3486 - 1394.40 = 25119.60
+    assert calculate_take_home_pay(30_000) == pytest.approx(25_119.60, abs=1)
+
+
+def test_take_home_higher_rate():
+    from calculations import calculate_take_home_pay
+    # £60,000 gross
+    # IT:  37700 * 0.20 + 9730 * 0.40 = 7540 + 3892 = 11432.00
+    # NI:  37700 * 0.08 + 9730 * 0.02 = 3016 + 194.60 = 3210.60
+    # Net: 60000 - 11432 - 3210.60 = 45357.40
+    assert calculate_take_home_pay(60_000) == pytest.approx(45_357.40, abs=1)
+
+
+def test_take_home_additional_rate():
+    from calculations import calculate_take_home_pay
+    # £130,000 gross
+    # IT:  37700*0.20 + 74870*0.40 + 4860*0.45 = 7540 + 29948 + 2187 = 39675.00
+    # NI:  37700*0.08 + 79730*0.02 = 3016 + 1594.60 = 4610.60
+    # Net: 130000 - 39675 - 4610.60 = 85714.40
+    assert calculate_take_home_pay(130_000) == pytest.approx(85_714.40, abs=1)

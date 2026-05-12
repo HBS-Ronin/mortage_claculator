@@ -57,3 +57,32 @@ def generate_amortization_schedule(house_value, down_payment_pct, annual_rate, t
             break
 
     return schedule, monthly_payment
+
+
+def calculate_take_home_pay(gross_salary):
+    """Return annual take-home pay after UK Income Tax and NI (2024/25 rates).
+
+    Uses England/Wales/Northern Ireland rates. Scalar inputs only.
+    """
+    _PA = 12_570
+    _BR_LIMIT = 50_270
+    _HR_LIMIT = 125_140
+
+    income_tax = 0.0
+    if gross_salary > _PA:
+        income_tax += (min(gross_salary, _BR_LIMIT) - _PA) * 0.20
+    if gross_salary > _BR_LIMIT:
+        income_tax += (min(gross_salary, _HR_LIMIT) - _BR_LIMIT) * 0.40
+    if gross_salary > _HR_LIMIT:
+        income_tax += (gross_salary - _HR_LIMIT) * 0.45
+
+    _NI_LOWER = 12_570
+    _NI_UPPER = 50_270
+
+    ni = 0.0
+    if gross_salary > _NI_LOWER:
+        ni += (min(gross_salary, _NI_UPPER) - _NI_LOWER) * 0.08
+    if gross_salary > _NI_UPPER:
+        ni += (gross_salary - _NI_UPPER) * 0.02
+
+    return gross_salary - income_tax - ni
