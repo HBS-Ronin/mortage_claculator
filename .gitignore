@@ -43,3 +43,6 @@ htmlcov/
 
 # Dash / Plotly cache
 .dash_cache/
+
+# Superpowers brainstorm sessions
+.superpowers/
