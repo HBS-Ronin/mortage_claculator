@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, dcc, html, dash_table
 import dash_bootstrap_components as dbc
 
-from calculations import calculate_principal, generate_amortization_schedule
+from calculations import calculate_principal, generate_amortization_schedule, calculate_take_home_pay
 
 _SIMPLE_TABS = {"tab-affordability", "tab-income", "tab-amortization", "tab-comparison"}
 
@@ -28,6 +28,13 @@ def register_callbacks(app):
             show if active_tab == "tab-repayment" else hide,
         )
 
+    @app.callback(
+        Output("partner-income-section", "style"),
+        Input("partner-income-toggle", "value"),
+    )
+    def toggle_partner_section(partner_toggle):
+        return {"display": "block"} if partner_toggle else {"display": "none"}
+
     # ── Simple tabs ───────────────────────────────────────────────────────────
 
     @app.callback(
@@ -39,23 +46,33 @@ def register_callbacks(app):
         Input("term-range-slider", "value"),
         Input("salary-slider", "value"),
         Input("multiplier-range-slider", "value"),
+        Input("partner-income-toggle", "value"),
+        Input("salary-2-slider", "value"),
         prevent_initial_call=False,
     )
     def render_tab_content(active_tab, monthly_payment, down_payment_pct,
-                           rate_range, term_range, salary, multiplier_range):
+                           rate_range, term_range, salary_1, multiplier_range,
+                           partner_toggle, salary_2):
+        effective_salary_2 = (salary_2 or 0) if partner_toggle else 0
+        combined_gross = salary_1 + effective_salary_2
+        combined_net = (calculate_take_home_pay(salary_1)
+                        + calculate_take_home_pay(effective_salary_2))
+        partner_active = bool(partner_toggle)
+
         if active_tab == "tab-affordability":
             return _render_affordability_tab(monthly_payment, down_payment_pct,
-                                             rate_range, term_range, salary, multiplier_range)
+                                             rate_range, term_range, combined_gross, multiplier_range)
         if active_tab == "tab-income":
-            return _render_income_tab(monthly_payment, down_payment_pct,
-                                      rate_range, term_range, salary, multiplier_range)
+            return _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range,
+                                      combined_gross, combined_net, multiplier_range,
+                                      salary_1, effective_salary_2, partner_active)
         if active_tab == "tab-amortization":
             return _render_amortization_tab(monthly_payment, down_payment_pct,
-                                            rate_range, term_range, salary)
+                                            rate_range, term_range, combined_gross, combined_net)
         if active_tab == "tab-comparison":
             return _render_comparison_tab(monthly_payment, down_payment_pct,
-                                          rate_range, term_range, salary, multiplier_range)
-        return html.Div()  # breakdown and repayment map use their own sections
+                                          rate_range, term_range, combined_gross, multiplier_range)
+        return html.Div()
 
     # ── Breakdown tab ─────────────────────────────────────────────────────────
 
@@ -68,13 +85,21 @@ def register_callbacks(app):
         Input("down-payment-slider", "value"),
         Input("salary-slider", "value"),
         Input("tabs", "active_tab"),
+        Input("partner-income-toggle", "value"),
+        Input("salary-2-slider", "value"),
     )
     def update_breakdown_results(rate, term, target_multiplier,
-                                 monthly_payment, down_payment_pct, salary, active_tab):
+                                 monthly_payment, down_payment_pct, salary_1, active_tab,
+                                 partner_toggle, salary_2):
         if active_tab != "tab-breakdown":
             return html.Div()
+        effective_salary_2 = (salary_2 or 0) if partner_toggle else 0
+        combined_gross = salary_1 + effective_salary_2
+        combined_net = (calculate_take_home_pay(salary_1)
+                        + calculate_take_home_pay(effective_salary_2))
         return _build_breakdown_cards(rate, term, monthly_payment,
-                                      down_payment_pct, salary, target_multiplier)
+                                      down_payment_pct, combined_gross, combined_net,
+                                      target_multiplier)
 
     # ── Repayment Map tab ─────────────────────────────────────────────────────
 
@@ -143,7 +168,7 @@ def register_callbacks(app):
 # ── Tab render helpers ────────────────────────────────────────────────────────
 
 def _render_affordability_tab(monthly_payment, down_payment_pct, rate_range, term_range,
-                               salary, multiplier_range):
+                               combined_gross, multiplier_range):
     annual_rates = np.linspace(rate_range[0], rate_range[1], 100) / 100
     terms = np.arange(term_range[0], term_range[1] + 1, 1)
     R, T = np.meshgrid(annual_rates, terms)
@@ -164,7 +189,7 @@ def _render_affordability_tab(monthly_payment, down_payment_pct, rate_range, ter
 
     annotations = []
     for idx, multiplier in enumerate(multiplier_range):
-        salary_based_value = salary * multiplier
+        salary_based_value = combined_gross * multiplier
         fig.add_contour(
             z=house_values, x=annual_rates * 100, y=terms,
             contours=dict(type="constraint", operation="=", value=salary_based_value),
@@ -195,15 +220,16 @@ def _render_affordability_tab(monthly_payment, down_payment_pct, rate_range, ter
 
 
 def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range,
-                        salary, multiplier_range):
+                        combined_gross, combined_net, multiplier_range,
+                        salary_1, salary_2, partner_active):
     mid_rate = (rate_range[0] + rate_range[1]) / 2 / 100
     mid_term = (term_range[0] + term_range[1]) // 2
 
     payment_based_value = float(calculate_principal(monthly_payment, mid_rate, mid_term, down_payment_pct))
     multipliers = np.linspace(multiplier_range[0], multiplier_range[1], 50)
-    salary_based_values = salary * multipliers
+    salary_based_values = combined_gross * multipliers
     mid_multiplier = (multiplier_range[0] + multiplier_range[1]) / 2
-    salary_based_value = salary * mid_multiplier
+    salary_based_value = combined_gross * mid_multiplier
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -220,21 +246,21 @@ def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range
     ))
 
     for ratio_pct in [25, 30]:
-        max_monthly = (salary / 12) * (ratio_pct / 100)
+        max_monthly = (combined_net / 12) * (ratio_pct / 100)
         ratio_house = float(calculate_principal(max_monthly, mid_rate, mid_term, down_payment_pct))
-        ratio_mult = ratio_house / salary
+        ratio_mult = ratio_house / combined_gross
         if multiplier_range[0] <= ratio_mult <= multiplier_range[1]:
             fig.add_trace(go.Scatter(
                 x=[multiplier_range[0], multiplier_range[1]],
                 y=[ratio_house, ratio_house],
                 mode="lines",
-                name=f"{ratio_pct}% payment ratio",
+                name=f"{ratio_pct}% of take-home",
                 line=dict(color="orange" if ratio_pct == 25 else "red", width=2, dash="dot"),
             ))
 
     for mult in [3, 4, 4.5, 5]:
         if multiplier_range[0] <= mult <= multiplier_range[1]:
-            val = salary * mult
+            val = combined_gross * mult
             fig.add_trace(go.Scatter(
                 x=[mult], y=[val], mode="markers+text",
                 name=f"{mult}x salary",
@@ -242,16 +268,29 @@ def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range
                 text=f"£{val:,.0f}", textposition="top center",
             ))
 
+    title = (
+        f"Income-Based Affordability (Combined Salary: £{combined_gross:,})"
+        if partner_active
+        else f"Income-Based Affordability (Salary: £{combined_gross:,})"
+    )
     fig.update_layout(
-        title=f"Income-Based Affordability Analysis (Salary: £{salary:,})",
+        title=title,
         xaxis_title="Salary Multiplier", yaxis_title="House Value [£]",
         height=400, showlegend=True, hovermode="x unified",
         legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01,
                     bgcolor="rgba(255,255,255,0.8)", bordercolor="rgba(0,0,0,0.2)", borderwidth=1),
     )
 
-    payment_to_salary_ratio = (monthly_payment * 12) / salary * 100
-    loan_to_income = (payment_based_value * (1 - down_payment_pct / 100)) / salary
+    payment_to_net_ratio = (monthly_payment * 12) / combined_net * 100
+    loan_to_income = (payment_based_value * (1 - down_payment_pct / 100)) / combined_gross
+
+    if partner_active:
+        salary_display = (
+            f"£{combined_gross:,} gross "
+            f"(Person 1: £{salary_1:,} + Partner: £{salary_2:,})"
+        )
+    else:
+        salary_display = f"£{combined_gross:,}"
 
     return dbc.Container([
         dbc.Row([dbc.Col([dcc.Graph(figure=fig)], md=12)], className="mb-3"),
@@ -259,16 +298,17 @@ def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range
             dbc.Col([dbc.Card([
                 dbc.CardHeader("Income Analysis", className="fw-bold"),
                 dbc.CardBody([
-                    html.P([html.Strong("Annual Salary: "), f"£{salary:,}"]),
+                    html.P([html.Strong("Annual Salary: "), salary_display]),
+                    html.P([html.Strong("Annual Take-Home: "), f"£{combined_net:,.0f}"]),
                     html.P([html.Strong("Annual Payment: "),
-                            f"£{monthly_payment * 12:,} ({payment_to_salary_ratio:.1f}% of salary)"]),
+                            f"£{monthly_payment * 12:,} ({payment_to_net_ratio:.1f}% of take-home)"]),
                     html.P([
-                        html.Strong("Payment to Salary Ratio: "),
-                        f"{payment_to_salary_ratio:.1f}%",
+                        html.Strong("Payment to Take-Home Ratio: "),
+                        f"{payment_to_net_ratio:.1f}%",
                         html.Span(
-                            " ✓ Within recommended 30-35%" if payment_to_salary_ratio <= 35
-                            else " ⚠ Above recommended 30-35%",
-                            className="text-success" if payment_to_salary_ratio <= 35 else "text-warning",
+                            " ✓ Within recommended 35%" if payment_to_net_ratio <= 35
+                            else " ⚠ Above recommended 35%",
+                            className="text-success" if payment_to_net_ratio <= 35 else "text-warning",
                         ),
                     ]),
                     html.P([html.Strong("Loan to Income Ratio: "), f"{loan_to_income:.2f}x"]),
@@ -290,19 +330,20 @@ def _render_income_tab(monthly_payment, down_payment_pct, rate_range, term_range
                         ),
                     ]),
                     html.P([html.Strong("Effective Multiplier: "),
-                            f"{payment_based_value / salary:.2f}x salary"]),
+                            f"{payment_based_value / combined_gross:.2f}x salary"]),
                 ]),
             ], className="mb-3")], md=6),
         ]),
         dbc.Row([dbc.Col([dbc.Alert([
             html.H6("💡 Lender Guidelines", className="alert-heading"),
-            html.P("Most UK lenders offer 4-4.5x salary. Some offer up to 5-5.5x for higher earners."),
+            html.P("Most UK lenders offer 4-4.5x salary. Some offer up to 5-5.5x for higher earners or joint applications."),
             html.P("Higher multipliers mean larger loans and more interest paid over time.", className="mb-0"),
         ], color="info")], md=12)]),
     ])
 
 
-def _render_amortization_tab(monthly_payment, down_payment_pct, rate_range, term_range, salary):
+def _render_amortization_tab(monthly_payment, down_payment_pct, rate_range, term_range,
+                              combined_gross, combined_net):
     mid_rate = (rate_range[0] + rate_range[1]) / 2 / 100
     mid_term = (term_range[0] + term_range[1]) // 2
 
@@ -312,8 +353,8 @@ def _render_amortization_tab(monthly_payment, down_payment_pct, rate_range, term
     )
     df = pd.DataFrame(schedule)
 
-    effective_multiplier = house_value / salary
-    payment_to_income = (actual_payment * 12) / salary * 100
+    effective_multiplier = house_value / combined_gross
+    payment_to_income = (actual_payment * 12) / combined_net * 100
 
     return dbc.Container([
         html.H5("Amortization Schedule (First 30 years)", className="mb-3"),
@@ -321,7 +362,7 @@ def _render_amortization_tab(monthly_payment, down_payment_pct, rate_range, term
         html.P([
             html.Strong("Actual monthly payment: "),
             f"£{actual_payment:.2f}",
-            html.Span(f" ({payment_to_income:.1f}% of annual salary)", className="text-muted ms-2"),
+            html.Span(f" ({payment_to_income:.1f}% of annual take-home)", className="text-muted ms-2"),
         ], className="mb-3"),
         html.P([html.Strong("Salary multiplier: "), f"{effective_multiplier:.2f}x"], className="mb-3"),
         dash_table.DataTable(
@@ -339,7 +380,7 @@ def _render_amortization_tab(monthly_payment, down_payment_pct, rate_range, term
 
 
 def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_range,
-                            salary, multiplier_range):
+                            combined_gross, multiplier_range):
     scenarios = [
         {"name": "Best Case",    "rate": rate_range[0] / 100, "term": term_range[1]},
         {"name": "Average Case", "rate": sum(rate_range) / 2 / 100, "term": (term_range[0] + term_range[1]) // 2},
@@ -357,11 +398,12 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
             "Rate": f"{s['rate'] * 100:.2f}%",
             "Term": f"{s['term']} years",
             "House Value": f"£{hv:,.0f}",
-            "Salary Multiplier": f"{hv / salary:.2f}x",
+            "Salary Multiplier": f"{hv / combined_gross:.2f}x",
             "Total Paid": f"£{total_paid:,.0f}",
             "Total Interest": f"£{total_paid - loan:,.0f}",
         })
         house_values.append(hv)
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=[s["name"] for s in scenarios], y=house_values,
@@ -370,7 +412,7 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
     ))
     for multiplier in multiplier_range:
         fig.add_hline(
-            y=salary * multiplier, line_dash="dot", line_color="blue",
+            y=combined_gross * multiplier, line_dash="dot", line_color="blue",
             annotation_text=f"{multiplier}x salary", annotation_position="left",
         )
     fig.update_layout(title="House Value Comparison Across Scenarios",
@@ -395,7 +437,8 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
     ])
 
 
-def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct, salary, target_multiplier):
+def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct,
+                            combined_gross, combined_net, target_multiplier):
     """Shared helper used by update_breakdown_results."""
     rate_decimal = rate / 100
     house_value = float(calculate_principal(monthly_payment, rate_decimal, term, down_payment_pct))
@@ -403,9 +446,9 @@ def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct, salary
     down_payment_amount = house_value * (down_payment_pct / 100)
     total_paid = monthly_payment * term * 12
     total_interest = total_paid - loan_amount
-    effective_multiplier = house_value / salary
-    payment_to_salary_ratio = (monthly_payment * 12) / salary * 100
-    target_house_value = salary * target_multiplier
+    effective_multiplier = house_value / combined_gross
+    payment_to_net_ratio = (monthly_payment * 12) / combined_net * 100
+    target_house_value = combined_gross * target_multiplier
 
     return dbc.Container([
         dbc.Row([
@@ -416,13 +459,14 @@ def _build_breakdown_cards(rate, term, monthly_payment, down_payment_pct, salary
                     html.P([html.Strong("Loan Term: "), f"{term} years"]),
                     html.P([html.Strong("Monthly Payment: "), f"£{monthly_payment:,.2f}"]),
                     html.P([html.Strong("Down Payment: "), f"{down_payment_pct}%"]),
-                    html.P([html.Strong("Annual Salary: "), f"£{salary:,}"]),
+                    html.P([html.Strong("Annual Salary: "), f"£{combined_gross:,}"]),
+                    html.P([html.Strong("Annual Take-Home: "), f"£{combined_net:,.0f}"]),
                     html.P([
-                        html.Strong("Payment to Salary: "),
-                        f"{payment_to_salary_ratio:.1f}%",
+                        html.Strong("Payment to Take-Home: "),
+                        f"{payment_to_net_ratio:.1f}%",
                         html.Span(
-                            " ✓" if payment_to_salary_ratio <= 35 else " ⚠",
-                            className="text-success" if payment_to_salary_ratio <= 35 else "text-warning",
+                            " ✓" if payment_to_net_ratio <= 35 else " ⚠",
+                            className="text-success" if payment_to_net_ratio <= 35 else "text-warning",
                         ),
                     ]),
                 ]),
