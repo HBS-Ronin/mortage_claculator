@@ -68,7 +68,6 @@ def register_callbacks(app):
         Input("down-payment-slider", "value"),
         Input("salary-slider", "value"),
         Input("tabs", "active_tab"),
-        prevent_initial_call=True,
     )
     def update_breakdown_results(rate, term, target_multiplier,
                                  monthly_payment, down_payment_pct, salary, active_tab):
@@ -86,7 +85,6 @@ def register_callbacks(app):
         Input("rate-range-slider", "value"),
         Input("down-payment-slider", "value"),
         Input("payment-slider", "value"),
-        prevent_initial_call=True,
     )
     def update_repayment_map(house_price, term_range, rate_range,
                              down_payment_pct, monthly_payment_budget):
@@ -349,6 +347,7 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
     ]
 
     comparison_data = []
+    house_values = []
     for s in scenarios:
         hv = float(calculate_principal(monthly_payment, s["rate"], s["term"], down_payment_pct))
         loan = hv * (1 - down_payment_pct / 100)
@@ -362,9 +361,7 @@ def _render_comparison_tab(monthly_payment, down_payment_pct, rate_range, term_r
             "Total Paid": f"£{total_paid:,.0f}",
             "Total Interest": f"£{total_paid - loan:,.0f}",
         })
-
-    house_values = [float(calculate_principal(monthly_payment, s["rate"], s["term"], down_payment_pct))
-                    for s in scenarios]
+        house_values.append(hv)
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=[s["name"] for s in scenarios], y=house_values,
